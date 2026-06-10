@@ -2,6 +2,7 @@ name: Winamax Boost Check
 
 on:
   schedule:
+    # Verifie les nouveaux boosts toutes les 10 minutes
     - cron: '*/10 * * * *'
   workflow_dispatch:
 
