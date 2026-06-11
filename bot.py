@@ -163,14 +163,17 @@ def get_betclic_state():
             browser = p.chromium.launch(headless=True)
             ctx = browser.new_context(user_agent=UA, locale="fr-FR")
             page = ctx.new_page()
-            page.goto("https://www.betclic.fr/cotes-boostees", timeout=60000, wait_until="domcontentloaded")
+            resp = page.goto("https://www.betclic.fr/cotes-boostees", timeout=60000, wait_until="domcontentloaded")
             page.wait_for_timeout(5000)
             raw = page.evaluate(
                 "() => { const el = document.getElementById('ng-state'); return el ? el.textContent : null; }"
             )
+            if not raw:
+                log.warning(f"ng-state Betclic vide ou absent | status={resp.status if resp else 'N/A'} | url={page.url} | titre={page.title()!r}")
+                html = page.content()
+                log.warning(f"debut HTML : {html[:500]!r}")
             browser.close()
         if not raw:
-            log.warning("ng-state Betclic vide ou absent")
             return None
         return json.loads(raw)
     except Exception as e:
