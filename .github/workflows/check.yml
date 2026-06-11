@@ -33,7 +33,6 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           WINAMAX_COOKIES: ${{ secrets.WINAMAX_COOKIES }}
-          BETCLIC_COOKIES: ${{ secrets.BETCLIC_COOKIES }}
 
       - name: Save state
         run: |

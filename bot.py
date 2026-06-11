@@ -8,7 +8,6 @@ CONFIG = {
 }
 
 COOKIES = os.environ["WINAMAX_COOKIES"]
-BETCLIC_COOKIES = os.environ["BETCLIC_COOKIES"]
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
 
@@ -157,87 +156,6 @@ def extract_boosts(data):
     return boosts
 
 
-def get_betclic_state():
-    from playwright.sync_api import sync_playwright
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            ctx = browser.new_context(user_agent=UA, locale="fr-FR")
-            cookies = []
-            for part in BETCLIC_COOKIES.split("; "):
-                if "=" in part:
-                    name, _, value = part.partition("=")
-                    cookies.append({"name": name, "value": value, "domain": ".betclic.fr", "path": "/"})
-            ctx.add_cookies(cookies)
-            page = ctx.new_page()
-            resp = page.goto("https://www.betclic.fr/cotes-boostees", timeout=60000, wait_until="domcontentloaded")
-            page.wait_for_timeout(5000)
-            raw = page.evaluate(
-                "() => { const el = document.getElementById('ng-state'); return el ? el.textContent : null; }"
-            )
-            if not raw:
-                log.warning(f"ng-state Betclic vide ou absent | status={resp.status if resp else 'N/A'} | url={page.url} | titre={page.title()!r}")
-            browser.close()
-        if not raw:
-            return None
-        return json.loads(raw)
-    except Exception as e:
-        log.error(f"Erreur page Betclic : {e}")
-        return None
-
-
-def extract_betclic_boosts(data):
-    boosts = []
-    if not data:
-        return boosts
-
-    def walk(obj):
-        if isinstance(obj, dict):
-            for k, v in obj.items():
-                if k == "boostedOdds" and isinstance(v, list):
-                    for item in v:
-                        yield item
-                yield from walk(v)
-        elif isinstance(obj, list):
-            for v in obj:
-                yield from walk(v)
-
-    try:
-        seen_keys = set()
-        for item in walk(data):
-            key = (item.get("matchId"), item.get("selectionId"), item.get("odds"))
-            if key in seen_keys:
-                continue
-            seen_keys.add(key)
-
-            match_name = item.get("matchName", "")
-            title = item.get("title", "")
-            selection = item.get("selectionName", "")
-            odd = item.get("odds", 0)
-            prev_odd = item.get("previousOdds", 0)
-            max_stake = item.get("maxStake")
-
-            pct = round(((odd - prev_odd) / prev_odd * 100) if prev_odd else 0, 1)
-
-            label = f"{title} - {selection}" if title else selection
-            boost_id = hashlib.md5(f"betclic{match_name}{label}{odd}".encode()).hexdigest()
-
-            boosts.append({
-                "id": boost_id,
-                "title": match_name,
-                "label": label,
-                "odd": odd,
-                "prev_odd": prev_odd,
-                "pct": pct,
-                "max_mise": str(int(max_stake)) if max_stake else None,
-                "site": "Betclic",
-            })
-    except Exception as e:
-        log.error(f"Erreur extraction Betclic : {e}")
-
-    return boosts
-
-
 def main():
     seen = set(load_json(SEEN_FILE, []))
     subs = load_json(SUBSCRIBERS_FILE, {"chat_ids": [CONFIG["telegram_chat_id"]], "last_update_id": 0})
@@ -250,11 +168,7 @@ def main():
     winamax_boosts = extract_boosts(get_initial_state())
     log.info(f"{len(winamax_boosts)} boost(s) Winamax trouve(s)")
 
-    log.info("Verification Betclic...")
-    betclic_boosts = extract_betclic_boosts(get_betclic_state())
-    log.info(f"{len(betclic_boosts)} boost(s) Betclic trouve(s)")
-
-    boosts = [b for b in (winamax_boosts + betclic_boosts) if b["max_mise"] == MAX_STAKE_FILTER]
+    boosts = [b for b in winamax_boosts if b["max_mise"] == MAX_STAKE_FILTER]
     log.info(f"{len(boosts)} boost(s) a {MAX_STAKE_FILTER}€ apres filtre")
 
     for b in boosts:
@@ -262,8 +176,7 @@ def main():
             continue
         seen.add(b["id"])
 
-        emoji = "🟠" if b["site"] == "Winamax" else "🔵"
-        msg = f"🚀 BOOST {b['site'].upper()} {emoji}\n"
+        msg = f"🚀 BOOST {b['site'].upper()} 🟠\n"
         msg += f"🏟 {b['title']}\n"
         msg += f"📌 {b['label']}\n"
         msg += f"📈 {b['prev_odd']} → {b['odd']}"
