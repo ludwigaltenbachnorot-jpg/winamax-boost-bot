@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import json, os, hashlib, logging, requests
+import json, os, re, hashlib, logging, requests
 
 CONFIG = {
     "telegram_token":   os.environ["TELEGRAM_TOKEN"],
@@ -13,6 +13,8 @@ UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML,
 
 SEEN_FILE = "seen.json"
 SUBSCRIBERS_FILE = "winamax_subscribers.json"
+
+MAX_STAKE_FILTER = "10"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -89,7 +91,7 @@ def get_initial_state():
             return None
         return json.loads(raw)
     except Exception as e:
-        log.error(f"Erreur page : {e}")
+        log.error(f"Erreur page Winamax : {e}")
         return None
 
 
@@ -112,11 +114,8 @@ def extract_boosts(data):
             if "boost" not in bet_title.lower():
                 continue
 
-            max_mise = None
-            for val in ["10", "20", "50"]:
-                if val in bet_title or val in bet_help:
-                    max_mise = val
-                    break
+            m = re.search(r"mise max (\d+)\s*€", bet_title, re.I) or re.search(r"(\d+)\s*€\s*maximum", bet_help, re.I)
+            max_mise = m.group(1) if m else None
 
             match_id = str(bet.get("matchId", ""))
             match_info = matches.get(match_id, {}) or {}
@@ -148,10 +147,85 @@ def extract_boosts(data):
                 "prev_odd": previous_odd,
                 "pct": pct,
                 "max_mise": max_mise,
+                "site": "Winamax",
             })
 
     except Exception as e:
-        log.error(f"Erreur extraction : {e}")
+        log.error(f"Erreur extraction Winamax : {e}")
+
+    return boosts
+
+
+def get_betclic_state():
+    from playwright.sync_api import sync_playwright
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            ctx = browser.new_context(user_agent=UA, locale="fr-FR")
+            page = ctx.new_page()
+            page.goto("https://www.betclic.fr/cotes-boostees", timeout=60000, wait_until="domcontentloaded")
+            page.wait_for_timeout(5000)
+            raw = page.evaluate(
+                "() => { const el = document.getElementById('ng-state'); return el ? el.textContent : null; }"
+            )
+            browser.close()
+        if not raw:
+            log.warning("ng-state Betclic vide ou absent")
+            return None
+        return json.loads(raw)
+    except Exception as e:
+        log.error(f"Erreur page Betclic : {e}")
+        return None
+
+
+def extract_betclic_boosts(data):
+    boosts = []
+    if not data:
+        return boosts
+
+    def walk(obj):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if k == "boostedOdds" and isinstance(v, list):
+                    for item in v:
+                        yield item
+                yield from walk(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                yield from walk(v)
+
+    try:
+        seen_keys = set()
+        for item in walk(data):
+            key = (item.get("matchId"), item.get("selectionId"), item.get("odds"))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+
+            match_name = item.get("matchName", "")
+            title = item.get("title", "")
+            selection = item.get("selectionName", "")
+            odd = item.get("odds", 0)
+            prev_odd = item.get("previousOdds", 0)
+            max_stake = item.get("maxStake")
+
+            pct = round(((odd - prev_odd) / prev_odd * 100) if prev_odd else 0, 1)
+
+            label = f"{title} - {selection}" if title else selection
+            boost_id = hashlib.md5(f"betclic{match_name}{label}{odd}".encode()).hexdigest()
+
+            boosts.append({
+                "id": boost_id,
+                "title": match_name,
+                "label": label,
+                "odd": odd,
+                "prev_odd": prev_odd,
+                "pct": pct,
+                "max_mise": str(int(max_stake)) if max_stake else None,
+                "site": "Betclic",
+            })
+    except Exception as e:
+        log.error(f"Erreur extraction Betclic : {e}")
 
     return boosts
 
@@ -164,26 +238,32 @@ def main():
 
     chat_ids, last_update_id = check_new_subscribers(chat_ids, last_update_id)
 
-    log.info("Verification...")
-    data = get_initial_state()
-    boosts = extract_boosts(data)
-    log.info(f"{len(boosts)} boost(s) trouve(s)")
+    log.info("Verification Winamax...")
+    winamax_boosts = extract_boosts(get_initial_state())
+    log.info(f"{len(winamax_boosts)} boost(s) Winamax trouve(s)")
+
+    log.info("Verification Betclic...")
+    betclic_boosts = extract_betclic_boosts(get_betclic_state())
+    log.info(f"{len(betclic_boosts)} boost(s) Betclic trouve(s)")
+
+    boosts = [b for b in (winamax_boosts + betclic_boosts) if b["max_mise"] == MAX_STAKE_FILTER]
+    log.info(f"{len(boosts)} boost(s) a {MAX_STAKE_FILTER}€ apres filtre")
 
     for b in boosts:
         if b["id"] in seen:
             continue
         seen.add(b["id"])
 
-        msg = f"🚀 BOOST WINAMAX\n"
+        emoji = "🟠" if b["site"] == "Winamax" else "🔵"
+        msg = f"🚀 BOOST {b['site'].upper()} {emoji}\n"
         msg += f"🏟 {b['title']}\n"
         msg += f"📌 {b['label']}\n"
         msg += f"📈 {b['prev_odd']} → {b['odd']}"
         if b["pct"]:
             msg += f" (+{b['pct']}%)"
-        if b["max_mise"]:
-            msg += f"\n💰 Mise max {b['max_mise']}€"
+        msg += f"\n💰 Mise max {b['max_mise']}€"
 
-        log.info(f"Nouveau : {b['title']} | {b['label']} | {b['odd']}")
+        log.info(f"Nouveau [{b['site']}] : {b['title']} | {b['label']} | {b['odd']}")
         send_telegram(msg, chat_ids)
 
     save_json(SEEN_FILE, list(seen))
