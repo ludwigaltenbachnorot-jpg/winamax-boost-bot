@@ -8,6 +8,7 @@ CONFIG = {
 }
 
 COOKIES = os.environ["WINAMAX_COOKIES"]
+BETCLIC_COOKIES = os.environ["BETCLIC_COOKIES"]
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
 
@@ -162,6 +163,12 @@ def get_betclic_state():
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             ctx = browser.new_context(user_agent=UA, locale="fr-FR")
+            cookies = []
+            for part in BETCLIC_COOKIES.split("; "):
+                if "=" in part:
+                    name, _, value = part.partition("=")
+                    cookies.append({"name": name, "value": value, "domain": ".betclic.fr", "path": "/"})
+            ctx.add_cookies(cookies)
             page = ctx.new_page()
             resp = page.goto("https://www.betclic.fr/cotes-boostees", timeout=60000, wait_until="domcontentloaded")
             page.wait_for_timeout(5000)
@@ -170,8 +177,6 @@ def get_betclic_state():
             )
             if not raw:
                 log.warning(f"ng-state Betclic vide ou absent | status={resp.status if resp else 'N/A'} | url={page.url} | titre={page.title()!r}")
-                html = page.content()
-                log.warning(f"debut HTML : {html[:500]!r}")
             browser.close()
         if not raw:
             return None
