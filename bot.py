@@ -14,7 +14,7 @@ UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML,
 SEEN_FILE = "seen.json"
 SUBSCRIBERS_FILE = "winamax_subscribers.json"
 
-MAX_STAKE_FILTER = "10"
+MAX_STAKE_FILTERS = {"10", "20"}  # Grosses cotes dorées (10€) + argentées (20€)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -114,7 +114,11 @@ def extract_boosts(data):
             if "boost" not in bet_title.lower():
                 continue
 
-            m = re.search(r"mise max (\d+)\s*€", bet_title, re.I) or re.search(r"(\d+)\s*€\s*maximum", bet_help, re.I)
+            # Regex élargie : couvre "mise max 10€", "mise max de 10€", "maximum de 10€", "10€ maximum", etc.
+            m = (re.search(r"mise\s+max(?:imum)?(?:\s+de)?\s*:?\s*(\d+)\s*€", bet_title, re.I)
+                 or re.search(r"mise\s+max(?:imum)?(?:\s+de)?\s*:?\s*(\d+)\s*€", bet_help, re.I)
+                 or re.search(r"(\d+)\s*€\s*(?:de\s+)?max(?:imum)?", bet_help, re.I)
+                 or re.search(r"max(?:imum)?(?:\s+de)?\s*:?\s*(\d+)\s*€", bet_help, re.I))
             max_mise = m.group(1) if m else None
 
             match_id = str(bet.get("matchId", ""))
@@ -166,10 +170,12 @@ def main():
 
     log.info("Verification Winamax...")
     winamax_boosts = extract_boosts(get_initial_state())
-    log.info(f"{len(winamax_boosts)} boost(s) Winamax trouve(s)")
+    log.info(f"{len(winamax_boosts)} boost(s) Winamax trouve(s) au total")
+    for b in winamax_boosts:
+        log.info(f"  -> [{b['max_mise']}€] {b['title']} | {b['label']} | cote {b['odd']}")
 
-    boosts = [b for b in winamax_boosts if b["max_mise"] == MAX_STAKE_FILTER]
-    log.info(f"{len(boosts)} boost(s) a {MAX_STAKE_FILTER}€ apres filtre")
+    boosts = [b for b in winamax_boosts if b["max_mise"] in MAX_STAKE_FILTERS]
+    log.info(f"{len(boosts)} boost(s) apres filtre ({'/'.join(sorted(MAX_STAKE_FILTERS))}€)")
 
     for b in boosts:
         if b["id"] in seen:
