@@ -40,4 +40,5 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add seen.json winamax_subscribers.json
           git diff --staged --quiet || git commit -m "Update bot state"
+          git pull --rebase origin main
           git push
