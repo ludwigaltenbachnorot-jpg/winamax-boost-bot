@@ -14,7 +14,7 @@ UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML,
 SEEN_FILE = "seen.json"
 SUBSCRIBERS_FILE = "winamax_subscribers.json"
 
-MAX_STAKE_FILTERS = {"10", "20"}  # Grosses cotes dorées (10€) + argentées (20€)
+MAX_STAKE_FILTERS = {"10"}  # Grosses cotes dorées uniquement (10€)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
