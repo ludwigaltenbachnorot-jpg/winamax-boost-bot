@@ -114,12 +114,25 @@ def extract_boosts(data):
             if "boost" not in bet_title.lower():
                 continue
 
-            # Regex élargie : couvre "mise max 10€", "mise max de 10€", "maximum de 10€", "10€ maximum", etc.
-            m = (re.search(r"mise\s+max(?:imum)?(?:\s+de)?\s*:?\s*(\d+)\s*€", bet_title, re.I)
-                 or re.search(r"mise\s+max(?:imum)?(?:\s+de)?\s*:?\s*(\d+)\s*€", bet_help, re.I)
-                 or re.search(r"(\d+)\s*€\s*(?:de\s+)?max(?:imum)?", bet_help, re.I)
-                 or re.search(r"max(?:imum)?(?:\s+de)?\s*:?\s*(\d+)\s*€", bet_help, re.I))
-            max_mise = m.group(1) if m else None
+            # Log tous les champs du bet pour diagnostiquer la structure réelle
+            log.info(f"[STRUCT] bet_id={bet_id} title={bet_title!r} help={bet_help!r} keys={list(bet.keys())}")
+            for k, v in bet.items():
+                if k not in ("outcomes", "matchId") and v:
+                    log.info(f"  {k}={v!r}")
+
+            # Champ direct maxStake s'il existe (comme Betclic)
+            direct_stake = bet.get("maxStake") or bet.get("maxBet") or bet.get("maxMise") or bet.get("stakeLimit")
+            if direct_stake:
+                max_mise = str(int(float(direct_stake)))
+            else:
+                # Regex élargie : couvre "mise max 10€", "mise max de 10€", "maximum de 10€", "10€ maximum", etc.
+                m = (re.search(r"mise\s+max(?:imum)?(?:\s+de)?\s*:?\s*(\d+)\s*€", bet_title, re.I)
+                     or re.search(r"mise\s+max(?:imum)?(?:\s+de)?\s*:?\s*(\d+)\s*€", bet_help, re.I)
+                     or re.search(r"(\d+)\s*€\s*(?:de\s+)?max(?:imum)?", bet_help, re.I)
+                     or re.search(r"max(?:imum)?(?:\s+de)?\s*:?\s*(\d+)\s*€", bet_help, re.I))
+                max_mise = m.group(1) if m else None
+
+            log.info(f"  => max_mise extrait: {max_mise!r}")
 
             match_id = str(bet.get("matchId", ""))
             match_info = matches.get(match_id, {}) or {}
